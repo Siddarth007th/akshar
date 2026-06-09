@@ -366,7 +366,7 @@ function decrypt_group_message(payload: []byte, group_key: [32]byte) -> plaintex
 
 ### 5.5 ZK Proof of Origin
 
-The ZK circuit proves: *"I possessed private_key K at time T, and SHA-256(encrypt(plaintext, K)) == content_hash H"* — without revealing K, T, plaintext, or any other message the node has authored.
+The ZK circuit proves: *"I held the Ed25519 private key K whose public key fingerprint is NodeID N, and I signed the message with content_hash H at time T"* — without revealing K, N's real-world identity, T's exact value, or any other message the node has authored. Note: the content hash covers the encrypted payload; the ZK proof attests to the signing key, not the encryption key (group key), which is separate.
 
 ```pseudocode
 // At message creation time (local only, never transmitted)
@@ -454,7 +454,17 @@ function handle_handshake(init: HandshakeInit) -> (HandshakeResponse, error):
         return (nil, ERR_NODEID_MISMATCH)
     if abs(init.timestamp - now_utc_ms()) > MAX_CLOCK_SKEW_MS:
         return (nil, ERR_CLOCK_SKEW)
-    return (HandshakeResponse{...}, nil)
+    local = get_local_identity()
+    response = HandshakeResponse{
+        protocol_version : CURRENT_PROTOCOL_VERSION,
+        node_id          : local.node_id,
+        public_key       : local.public_key,
+        tier             : local.tier,
+        timestamp        : now_utc_ms(),
+        nonce            : init.nonce,        // echo initiator nonce to bind response
+        signature        : Ed25519.sign(local.private_key, {local.node_id, now_utc_ms(), init.nonce})
+    }
+    return (response, nil)
 ```
 
 ### 6.4 Message Routing
@@ -571,7 +581,8 @@ function share_message(sharer: NodeIdentity, source_msg: Message, group: Group) 
         return (nil, ERR_NOT_GROUP_MEMBER)
 
     // Build attribution chain: extend the source message's chain
-    prev_chain = get_attribution_chain(source_msg)   // [] if first share
+    // First share of a message: chain starts with the original author
+    prev_chain = get_attribution_chain(source_msg)   // [author_node_id] if first share
     attribution_chain = prev_chain + [sharer.node_id]
 
     share_record = ShareRecord{
@@ -611,11 +622,11 @@ function share_message(sharer: NodeIdentity, source_msg: Message, group: Group) 
 ```pseudocode
 function like_feed_item(node: NodeIdentity, event_id: UUID):
     record_reaction(event_id, node.node_id, REACTION_LIKE)
-    apply_velocity_delta(event_id, +LIKE_VELOCITY_DELTA)
+    apply_velocity_delta(event_id, +LIKE_VELOCITY_DELTA)    // see §14: LIKE_VELOCITY_DELTA
 
 function dislike_feed_item(node: NodeIdentity, event_id: UUID):
     record_reaction(event_id, node.node_id, REACTION_DISLIKE)
-    apply_velocity_delta(event_id, -DISLIKE_VELOCITY_DELTA)
+    apply_velocity_delta(event_id, -DISLIKE_VELOCITY_DELTA) // see §14: DISLIKE_VELOCITY_DELTA
 
 function share_from_feed(node: NodeIdentity, event_id: UUID) -> (ShareRecord, error):
     feed_event = get_feed_event(event_id)
@@ -1167,6 +1178,10 @@ EPOCH_DURATION_MS               = 86_400_000      // 24 hours
 // Subscription
 SUBSCRIPTION_VELOCITY_BOOST     = 2.0             // additional velocity units
 SUBSCRIPTION_BOOST_DECAY_MS     = 3_600_000       // 1 hour decay window
+
+// Feed reactions
+LIKE_VELOCITY_DELTA             = 0.1             // velocity added per like
+DISLIKE_VELOCITY_DELTA          = 0.15            // velocity subtracted per dislike
 
 // PoH
 POW_DIFFICULTY_BITS             = 24              // leading zero bits; targets ~60 min on mobile
