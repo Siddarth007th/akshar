@@ -161,7 +161,7 @@ Message {
     reply_to          [16]byte        // parent message_id; zero-value if root
     content_hash      [32]byte        // SHA-256 of encrypted_payload
     encrypted_payload []byte          // E2E encrypted; opaque to all non-members
-    zk_origin_token   []byte          // optional; ZKProof; nil until claimed
+    zk_origin_token   []byte          // optional; ZKProof bytes (see §5.5); nil until claimed
     signature         [64]byte        // Ed25519 sig over all preceding fields
 }
 ```
@@ -744,9 +744,11 @@ function update_node_score(node_id: NodeID, share_id: UUID):
         new_score = max(new_score - decay, SCORE_FLOOR)
 
     store_node_score(node_id, new_score, now_utc_ms())
+```
 
 ### 8.5 Re-evaluation Pass
 
+```pseudocode
 function run_reeval_pass():
     // Periodic background task; runs every REEVAL_INTERVAL_MS
     pending = get_messages_with_reeval_pending()
@@ -1067,6 +1069,7 @@ get_feed(node_id, since_ts, limit)                    -> ([]FeedEvent, error)
 claim_originator_reward(node_id, message_id)          -> (TokenClaim, error)
 get_token_balance(node_id)                            -> (uint64, error)
 get_node_score(node_id)                               -> (float32, error)
+get_share_history(node_id, since_ts, limit)           -> ([]ShareRecord, error)
 
 // PoH operations
 start_tier_upgrade(node_id, target_tier)              -> (UpgradeSession, error)
@@ -1139,6 +1142,7 @@ MAX_CLOCK_SKEW_MS               = 30_000          // 30 seconds
 
 // Relay
 RELAY_TTL_MS                    = 604_800_000     // 7 days
+MAX_BLOB_PAYLOAD_BYTES          = 10_485_760      // 10 MB max payload per blob
 
 // Diversity scoring
 DIVERSITY_THRESHOLD_LOW         = 0.15            // below = clustered
